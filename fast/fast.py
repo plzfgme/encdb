@@ -22,9 +22,8 @@ class FASTClient:
         return self.iv
 
     def gen_update_tokens(self, ind, w, op):
-        w_bytes = bytes(w, 'utf-8')
-        t_w = pseudo_function_F(self.k_s, primitive_hash_h(w_bytes), self.iv)
-        raw_val = self.db.get(w_bytes)
+        t_w = pseudo_function_F(self.k_s, primitive_hash_h(w), self.iv)
+        raw_val = self.db.get(w)
         if raw_val is not None:
             st_c = raw_val[:16]
             c = int.from_bytes(raw_val[16:], 'big')
@@ -33,7 +32,7 @@ class FASTClient:
             c = 0
         k_c_add_1 = os.urandom(16)
         st_c_add_1 = pseudo_permutation_P(k_c_add_1, st_c, self.iv)
-        self.db.put(w_bytes, st_c_add_1 + (c+1).to_bytes(16, 'big'))
+        self.db.put(w, st_c_add_1 + (c+1).to_bytes(16, 'big'))
         if op == 'add':
             op = (0).to_bytes(1, 'big')
         else:
@@ -46,9 +45,8 @@ class FASTClient:
         return u, e
 
     def gen_search_tokens(self, w):
-        w_bytes = bytes(w, 'utf-8')
-        t_w = pseudo_function_F(self.k_s, primitive_hash_h(w_bytes), self.iv)
-        raw_val = self.db.get(w_bytes)
+        t_w = pseudo_function_F(self.k_s, primitive_hash_h(w), self.iv)
+        raw_val = self.db.get(w)
         if raw_val is None:
             return None
         st_c = raw_val[:16]
