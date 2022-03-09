@@ -1,0 +1,27 @@
+keys_db_path: 'client_keys.db'
+
+
+index_db_path: 'client_index.db'
+
+
+mongodb:
+
+  uri: 'mongo://gytadmin:123456@localhost:27017'
+
+  db_name: 'test_db'
+
+
+collections:
+
+  students:
+    fields:
+      name:
+        equal:
+      age:
+        equal:
+        range:
+          range_log_2: 16
+      score:
+        equal:
+        range:
+          range_log_2: 32

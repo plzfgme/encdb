@@ -14,10 +14,10 @@ class DBIndexClient:
     def set_keys(self, keys):
         self.fast_client.set_keys(keys)
 
-    def gen_insert_equal_token(self, op: str, table_name: str, id: bytes, field_name: str, val: bytes):
+    def gen_update_equal_token(self, op: str, table_name: str, id: bytes, field_name: str, val: bytes):
         return self.fast_client.gen_update_tokens(id, self._equal_keyword(table_name, field_name, val), op)
 
-    def gen_insert_range_tokens(self, op: str, table_name: str, id: bytes, field_name: str, val: int, range_log_2: int):
+    def gen_update_range_tokens(self, op: str, table_name: str, id: bytes, field_name: str, val: int, range_log_2: int):
         val_bin = int2ba(val, length=range_log_2, endian='big')
         tokens_list = []
         for i in range(range_log_2+1):
@@ -70,10 +70,10 @@ class DBIndexServer:
     def set_keys(self, keys):
         self.fast_server.set_keys(keys)
 
-    def insert_one_token(self, token):
+    def update_one_token(self, token):
         self.fast_server.update(*token)
 
-    def insert_tokens(self, token_list):
+    def update_tokens(self, token_list):
         for token in token_list:
             self.fast_server.update(*token)
 
