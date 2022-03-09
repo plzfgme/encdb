@@ -2,14 +2,17 @@ from fast import *
 from bitarray.util import ba2int, int2ba
 
 class DBIndexClient:
-    def __init__(self, db_path: str, keys_path=None):
-        self.fast_client = FASTClient(db_path, keys_path)
+    def __init__(self, db_path: str, keys=None):
+        self.fast_client = FASTClient(db_path, keys)
 
-    def store_keys(self, keys_path):
-        self.fast_client.store_keys(keys_path)
+    def get_keys(self):
+        return self.fast_client.get_keys()
 
-    def get_iv(self):
-        return self.fast_client.get_iv()
+    def get_keys_for_server(self):
+        return self.fast_client.get_keys_for_server()
+
+    def set_keys(self, keys):
+        self.fast_client.set_keys(keys)
 
     def gen_insert_equal_token(self, op: str, table_name: str, id: bytes, field_name: str, val: bytes):
         return self.fast_client.gen_update_tokens(id, self._equal_keyword(table_name, field_name, val), op)
@@ -58,8 +61,14 @@ class DBIndexClient:
         return bytes(table_name, 'utf-8')+b':r:'+bytes(field_name, 'utf-8')+b':'+bytes(str(bit_len), 'utf-8')+b':'+val
 
 class DBIndexServer:
-    def __init__(self, db_path, iv):
-        self.fast_server = FASTServer(db_path, iv)
+    def __init__(self, db_path, keys):
+        self.fast_server = FASTServer(db_path, keys)
+
+    def get_keys(self):
+        return self.fast_server.get_keys()
+
+    def set_keys(self, keys):
+        self.fast_server.set_keys(keys)
 
     def insert_one_token(self, token):
         self.fast_server.update(*token)

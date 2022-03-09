@@ -3,7 +3,7 @@ from fast import *
 
 if __name__ == "__main__":
     client = FASTClient('client.db')
-    server = FASTServer('server.db', client.get_iv())
+    server = FASTServer('server.db', client.get_keys())
     u, e = client.gen_update_tokens(b'123456', b'gyt', 'add')
     server.update(u, e)
     u, e = client.gen_update_tokens(b'123456', b'gyt', 'del')
@@ -20,5 +20,4 @@ if __name__ == "__main__":
     if result is not None:
         t_w, st_c, c = result
         print(server.search(t_w, st_c, c))
-    client.store_keys('client_keys.pickle')
 

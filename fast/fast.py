@@ -1,25 +1,26 @@
 from .utils import *
 import os
 from itertools import cycle
-import pickle
 import rocksdb
 
 class FASTClient:
-    def __init__(self, db_path, keys_path=None):
-        if keys_path is None:
+    def __init__(self, db_path, keys=None):
+        if keys is None:
             self.k_s = os.urandom(16)
             self.iv = os.urandom(16)
         else:
-            with open(keys_path, 'rb') as f:
-                self.k_s, self.iv = pickle.load(f)
+            self.set_keys(keys)
         self.db = rocksdb.DB(db_path, rocksdb.Options(create_if_missing=True))
 
-    def store_keys(self, path):
-        with open(path, 'wb') as f:
-            pickle.dump((self.k_s, self.iv), f)
+    def get_keys(self):
+        return {'k_s': self.k_s, 'iv': self.iv}
 
-    def get_iv(self):
-        return self.iv
+    def get_keys_for_server(self):
+        return {'iv': self.iv}
+
+    def set_keys(self, keys: dict):
+        self.k_s = keys['k_s']
+        self.iv = keys['iv']
 
     def gen_update_tokens(self, ind, w, op):
         t_w = pseudo_function_F(self.k_s, primitive_hash_h(w), self.iv)
@@ -55,9 +56,15 @@ class FASTClient:
         return t_w, st_c, c
 
 class FASTServer:
-    def __init__(self, db_path, iv):
-        self.iv = iv
+    def __init__(self, db_path, keys):
+        self.set_keys(keys)
         self.db = rocksdb.DB(db_path, rocksdb.Options(create_if_missing=True))
+
+    def get_keys(self):
+        return {'iv', self.iv}
+
+    def set_keys(self, keys):
+        self.iv = keys['iv']
 
     def update(self, u, e):
         self.db.put(u, e)
