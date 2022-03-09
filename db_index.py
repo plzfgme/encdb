@@ -11,7 +11,7 @@ class DBIndexClient:
     def get_iv(self):
         return self.fast_client.get_iv()
 
-    def gen_insert_equal_tokens(self, op: str, table_name: str, id: bytes, field_name: str, val: bytes):
+    def gen_insert_equal_token(self, op: str, table_name: str, id: bytes, field_name: str, val: bytes):
         return self.fast_client.gen_update_tokens(id, self._equal_keyword(table_name, field_name, val), op)
 
     def gen_insert_range_tokens(self, op: str, table_name: str, id: bytes, field_name: str, val: int, range_log_2: int):
@@ -22,7 +22,7 @@ class DBIndexClient:
 
         return tokens_list
 
-    def gen_search_equal_tokens(self, table_name: str, field_name: str, val: bytes):
+    def gen_search_equal_token(self, table_name: str, field_name: str, val: bytes):
         return self.fast_client.gen_search_tokens(self._equal_keyword(table_name, field_name, val))
 
     def gen_search_range_tokens(self, table_name: str, field_name: str, a: int, b: int, range_log_2: int):
@@ -61,19 +61,19 @@ class DBIndexServer:
     def __init__(self, db_path, iv):
         self.fast_server = FASTServer(db_path, iv)
 
-    def insert_equal(self, tokens):
-        self.fast_server.update(*tokens)
+    def insert_one_token(self, token):
+        self.fast_server.update(*token)
 
-    def insert_range(self, tokens_list):
-        for tokens in tokens_list:
-            self.fast_server.update(*tokens)
+    def insert_tokens(self, token_list):
+        for token in token_list:
+            self.fast_server.update(*token)
 
-    def search_equal(self, tokens):
-        return self.fast_server.search(*tokens)
+    def search_one_token(self, token):
+        return self.fast_server.search(*token)
 
-    def search_range(self, tokens_list):
+    def search_tokens_union(self, token_list):
         rset = set()
-        for tokens in tokens_list:
-            rset = rset.union(self.fast_server.search(*tokens))
+        for token in token_list:
+            rset = rset.union(self.fast_server.search(*token))
         
         return rset
