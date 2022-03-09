@@ -1,10 +1,15 @@
-from .fast import *
-from bitarray import bitarray
+from fast import *
 from bitarray.util import ba2int, int2ba
 
 class DBIndexClient:
-    def __init__(self, db_path: str, keys_path: str):
+    def __init__(self, db_path: str, keys_path=None):
         self.fast_client = FASTClient(db_path, keys_path)
+
+    def store_keys(self, keys_path):
+        self.fast_client.store_keys(keys_path)
+
+    def get_iv(self):
+        return self.fast_client.get_iv()
 
     def gen_insert_equal_tokens(self, op: str, table_name: str, id: bytes, field_name: str, val: bytes):
         return self.fast_client.gen_update_tokens(id, self._equal_keyword(table_name, field_name, val), op)
@@ -12,8 +17,8 @@ class DBIndexClient:
     def gen_insert_range_tokens(self, op: str, table_name: str, id: bytes, field_name: str, val: int, range_log_2: int):
         val_bin = int2ba(val, length=range_log_2, endian='big')
         tokens_list = []
-        for i in range(len(val_bin)):
-            tokens_list.append(self.fast_client.gen_update_tokens(id, self._range_keyword(table_name, field_name, val_bin[:i].tobytes()), op))
+        for i in range(range_log_2+1):
+            tokens_list.append(self.fast_client.gen_update_tokens(id, self._range_keyword(table_name, field_name, val_bin[:i].tobytes(), i), op))
 
         return tokens_list
 
@@ -27,32 +32,34 @@ class DBIndexClient:
         b_bin = int2ba(b, range_log_2, 'big')
         while len(a_bin) != 0 and ba2int(a_bin) < ba2int(b_bin):
             if a_bin[-1] == 1:
-                cset.add(a_bin)
+                cset.add((a_bin.tobytes(), range_log_2-i))
             if b_bin[-1] == 0:
-                cset.add(b_bin)
-            a_bin = int2ba(ba2int(a_bin) + 1, range_log_2, 'big')
-            b_bin = int2ba(ba2int(b_bin) - 1, range_log_2, 'big')
+                cset.add((b_bin.tobytes(), range_log_2-i))
+            a_bin = int2ba(ba2int(a_bin) + 1, range_log_2-i, 'big')
+            b_bin = int2ba(ba2int(b_bin) - 1, range_log_2-i, 'big')
 
-            a_bin >>= 1
-            b_bin >>= 1
+            a_bin = a_bin[:-1] 
+            b_bin = b_bin[:-1]
             i += 1
         if a_bin == b_bin:
-            cset.add(a_bin)
+            cset.add((a_bin.tobytes(), range_log_2-i))
         tokens_list = []
-        for val_bin in cset:
-            tokens_list.append(self.fast_client.gen_search_tokens(self._range_keyword(table_name, field_name, val_bin.tobytes())))
+        for (val, bit_len) in cset:
+            tokens = self.fast_client.gen_search_tokens(self._range_keyword(table_name, field_name, val, bit_len))
+            if tokens is not None:
+                tokens_list.append(self.fast_client.gen_search_tokens(self._range_keyword(table_name, field_name, val, bit_len)))
         
         return tokens_list
 
     def _equal_keyword(self, table_name: str, field_name: str, val: bytes):
         return bytes(table_name, 'utf-8')+b':e:'+bytes(field_name, 'utf-8')+b':'+val
 
-    def _range_keyword(self, table_name: str, field_name: str, val: bytes):
-        return bytes(table_name, 'utf-8')+b':r:'+bytes(field_name, 'utf-8')+b':'+val
+    def _range_keyword(self, table_name: str, field_name: str, val: bytes, bit_len: int):
+        return bytes(table_name, 'utf-8')+b':r:'+bytes(field_name, 'utf-8')+b':'+bytes(str(bit_len), 'utf-8')+b':'+val
 
 class DBIndexServer:
-    def __init__(self, db_path, client_init_msg):
-        self.fast_server = FASTServer(db_path, client_init_msg)
+    def __init__(self, db_path, iv):
+        self.fast_server = FASTServer(db_path, iv)
 
     def insert_equal(self, tokens):
         self.fast_server.update(*tokens)
@@ -67,6 +74,6 @@ class DBIndexServer:
     def search_range(self, tokens_list):
         rset = set()
         for tokens in tokens_list:
-            rset.union(self.fast_server.search(*tokens))
+            rset = rset.union(self.fast_server.search(*tokens))
         
         return rset
