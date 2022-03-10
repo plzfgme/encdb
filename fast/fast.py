@@ -61,7 +61,7 @@ class FASTServer:
         self.db = rocksdb.DB(db_path, rocksdb.Options(create_if_missing=True))
 
     def get_keys(self):
-        return {'iv', self.iv}
+        return {'iv': self.iv}
 
     def set_keys(self, keys):
         self.iv = keys['iv']

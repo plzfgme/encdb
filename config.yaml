@@ -1,8 +1,6 @@
-keys_db_path: 'client_keys.db'
+client_storage_path: './tmp/client/'
 
-
-index_db_path: 'client_index.db'
-
+server_storage_path: './tmp/server/'
 
 mongodb:
 
@@ -15,12 +13,12 @@ collections:
 
   students:
     name:
-      equal:
+      "func:equal":
     age:
-      equal:
-      range:
+      "func:equal":
+      "func:range":
         range_log_2: 16
     score:
-      equal:
-      range:
+      "func:equal":
+      "func:range":
         range_log_2: 32
