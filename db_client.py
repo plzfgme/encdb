@@ -25,7 +25,7 @@ class DBClient:
         else:
             key = key_iv[:16]
             iv = key_iv[16:]
-        obj_id = self.doc_db['collection_name'].insert_one(enc_doc(key, bson.encode(document),iv)).inserted_id
+        obj_id = self.doc_db[collection_name].insert_one({'binary': enc_doc(key, bson.encode(document), iv)}).inserted_id
         if obj_id is None:
             return None
         return obj_id.binary
@@ -73,21 +73,21 @@ class DBClient:
         key = key_iv[:16]
         iv = key_iv[16:]
         for encrypted_doc in cursor:
-            docs.append(bson.decode(dec_doc(key, encrypted_doc, iv)))
+            docs.append(bson.decode(dec_doc(key, encrypted_doc['binary'], iv)))
 
         return docs
 
                             
     def _to_bytes(self, val):
         t = type(val)
-        if t == 'str':
+        if t is str:
             return bytes(val, 'utf-8')
-        elif t == 'int':
+        elif t is int:
             if val > 0xffff:
                 return val.to_bytes(8, 'big')
             else:
                 return val.to_bytes(4, 'big')
-        elif t == 'bytes':
+        elif t is bytes:
             return val
         else:
             return bytes(val)
