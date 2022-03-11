@@ -17,26 +17,36 @@ class EncDB_Local:
         self.index_server = DBIndexServer(self._server_index_path(), self.index_client.get_key_for_server())
         self.document_db = MongoClient(self.config['mongodb']['uri'])[self.config['mongodb']['db_name']]
 
-    def insert_one(self, collection_name: str, document: dict):
+    def insert_one(self, collection_name: str, document: dict, print_data: bool = False):
         # client
         objid = ObjectId()
         key, iv = self._get_or_gen_doc_key_iv(collection_name)
         enced_doc = aes_enc(key, bson.encode(document), iv)
+        if print_data:
+            print(f'encrypted documents:\n{enced_doc}')
         doc_to_insert = {
             '_id': objid,
             'binary': enced_doc,
         }
         tokens = self._gen_index_insert_tokens(objid, collection_name, document)
+        if print_data:
+            print(f'tokens:\n{tokens}')
         # server
         self.document_db[collection_name].insert_one(doc_to_insert)
         self.index_server.update(tokens)
 
-    def search_equal(self, collection_name, field_name, val):
+    def search_equal(self, collection_name, field_name, val, print_data: bool = False):
         # client
         tokens = self.index_client.gen_search_equal_tokens(collection_name, field_name, self._val_to_bytes(val))
+        if print_data:
+            print(f'tokens:\n{tokens}')
         # server
         ids = self.index_server.search_tokens_union(tokens)
+        if print_data:
+            print(f'ids:\n{ids}')
         enced_docs = self._retrieve_docs(collection_name, ids)
+        if print_data:
+            print(f'encrypted documents:\n{enced_docs}')
         # client
         key, iv = self._get_doc_key_iv(collection_name)
         docs = []
@@ -45,13 +55,19 @@ class EncDB_Local:
 
         return docs
 
-    def search_range(self, collection_name, field_name, a, b):
+    def search_range(self, collection_name, field_name, a, b, print_data: bool = False):
         # client
         range_log_2 = self.config['collections'][collection_name][field_name]['func:range']['range_log_2']
         tokens = self.index_client.gen_search_range_tokens(collection_name, field_name, a, b, range_log_2)
+        if print_data:
+            print(f'tokens:\n{tokens}')
         # server
         ids = self.index_server.search_tokens_union(tokens)
+        if print_data:
+            print(f'ids:\n{ids}')
         enced_docs = self._retrieve_docs(collection_name, ids)
+        if print_data:
+            print(f'encrypted documents:\n{enced_docs}')
         # client
         key, iv = self._get_doc_key_iv(collection_name)
         docs = []
