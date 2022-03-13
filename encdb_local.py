@@ -20,8 +20,8 @@ class EncDB_Local:
     def insert_one(self, collection_name: str, document: dict):
         # client
         objid = ObjectId()
-        doc_to_insert = self._doc_encrypt(objid, collection_name, document)
-        print(doc_to_insert)
+        document['_id'] = objid
+        doc_to_insert = self._doc_encrypt(collection_name, document)
         tokens = self._gen_index_insert_tokens(objid, collection_name, document)
         enced_cname = self._cname_encrypt(collection_name)
         # server
@@ -37,7 +37,7 @@ class EncDB_Local:
         # client
         docs = []
         for enced_doc in enced_docs:
-            docs.append(self._doc_decrypt(collection_name, enced_doc)[1])
+            docs.append(self._doc_decrypt(collection_name, enced_doc))
 
         return docs
 
@@ -51,7 +51,7 @@ class EncDB_Local:
         # client
         docs = []
         for enced_doc in enced_docs: 
-            docs.append(self._doc_decrypt(collection_name, enced_doc)[1])
+            docs.append(self._doc_decrypt(collection_name, enced_doc))
 
         return docs
         
@@ -66,9 +66,10 @@ class EncDB_Local:
 
         return docs
 
-    def _doc_encrypt(self, objid: ObjectId, collection_name: str, document: dict):
+    def _doc_encrypt(self, collection_name: str, document: dict):
         ckey, civ = self._get_or_gen_collection_key_iv(collection_name)
         enced_doc = {}
+        enced_doc['_id'] = document.pop('_id')
         for field_name, val in document.items():
             enced_fname = bytes2astr(aes_enc(ckey, bytes(field_name, 'utf-8'), civ))
             iv = urandom(16)
@@ -77,8 +78,6 @@ class EncDB_Local:
                 'iv': iv
             }
             enced_doc[enced_fname] = enced_val
-
-        enced_doc['_id'] = objid
 
         return enced_doc
 
@@ -90,8 +89,9 @@ class EncDB_Local:
             field_name = str(aes_dec(ckey, astr2bytes(enced_fname), civ), 'utf-8')
             val = bson.decode(aes_dec(self._get_field_key(collection_name, field_name), enced_val['rnd'], enced_val['iv']))['0']
             doc[field_name] = val
+        doc['_id'] = objid
 
-        return objid, doc
+        return doc
 
     def _fname_encrypt(self, collection_name: str, field_name: str):
         ckey, civ = self._get_or_gen_collection_key_iv(collection_name)
