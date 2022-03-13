@@ -28,6 +28,13 @@ class EncDB_Local:
         self.document_db[enced_cname].insert_one(doc_to_insert)
         self.index_server.update(tokens)
 
+    def delete_one(self, collection_name: str, document: dict):
+        # client
+        tokens = self._gen_index_delete_tokens(collection_name, document)
+        # server
+        self.index_server.update(tokens)
+
+
     def search_equal(self, collection_name, field_name, val):
         # client
         tokens = self.index_client.gen_search_equal_tokens(collection_name, field_name, self._val_to_bytes(val))
@@ -121,6 +128,26 @@ class EncDB_Local:
                             tokens.extend(self.index_client.gen_update_equal_tokens('add', collection_name, id, field, self._val_to_bytes(document[field])))
                         if func == 'func:range':
                             tokens.extend(self.index_client.gen_update_range_tokens('add', collection_name, id, field, document[field], field_config['func:range']['range_log_2']))
+            return tokens
+
+        return []
+
+    def _gen_index_delete_tokens(self, collection_name: str, document: dict):
+        id = document['_id'].binary
+        collection_config = self.config.get('collections')
+        if collection_config == None:
+            return []
+        field_configs = collection_config.get(collection_name)
+        if field_configs is not None:
+            tokens = []
+            for field in document.keys():
+                field_config = field_configs.get(field)
+                if field_config != None:
+                    for func in field_config.keys():
+                        if func == 'func:equal':
+                            tokens.extend(self.index_client.gen_update_equal_tokens('del', collection_name, id, field, self._val_to_bytes(document[field])))
+                        if func == 'func:range':
+                            tokens.extend(self.index_client.gen_update_range_tokens('del', collection_name, id, field, document[field], field_config['func:range']['range_log_2']))
             return tokens
 
         return []
