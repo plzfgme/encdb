@@ -1,6 +1,5 @@
 from Crypto.Cipher import AES
 from Crypto.Util.py3compat import bchr, bord
-import functools
 
 def aes_enc(key, raw, iv):
     padding_len = 16 - len(raw) % 16
@@ -15,5 +14,17 @@ def aes_dec(key, ctext, iv):
     return padded_result[:-padding_len]
 
 def bytes2astr(b: bytes) -> str:
-    return functools.reduce(lambda a, b: chr(a >> 4 + 97) + chr(a & 0x0f + 97) + chr(b >> 4 + 97) + chr(b & 0x0f + 97), b)
+    result = ''
+    for c in b:
+        result += chr((c >> 4) + 97)
+        result += chr((c & 0x0f) + 97)
+
+    return result
+
+def astr2bytes(s: str) -> bytes:
+    result = b''
+    for i in range(0, len(s), 2):
+        result += (((ord(s[i]) - 97) << 4) + ord(s[i+1]) - 97).to_bytes(1, 'big')
+
+    return result
 

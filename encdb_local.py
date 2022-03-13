@@ -20,15 +20,12 @@ class EncDB_Local:
     def insert_one(self, collection_name: str, document: dict):
         # client
         objid = ObjectId()
-        key, iv = self._get_or_gen_doc_key_iv(collection_name)
-        enced_doc = aes_enc(key, bson.encode(document), iv)
-        doc_to_insert = {
-            '_id': objid,
-            'binary': enced_doc,
-        }
+        doc_to_insert = self._doc_encrypt(objid, collection_name, document)
+        print(doc_to_insert)
         tokens = self._gen_index_insert_tokens(objid, collection_name, document)
+        enced_cname = self._cname_encrypt(collection_name)
         # server
-        self.document_db[collection_name].insert_one(doc_to_insert)
+        self.document_db[enced_cname].insert_one(doc_to_insert)
         self.index_server.update(tokens)
 
     def search_equal(self, collection_name, field_name, val):
@@ -38,10 +35,9 @@ class EncDB_Local:
         ids = self.index_server.search_tokens_union(tokens)
         enced_docs = self._retrieve_docs(collection_name, ids)
         # client
-        key, iv = self._get_doc_key_iv(collection_name)
         docs = []
         for enced_doc in enced_docs:
-            docs.append(bson.decode(aes_dec(key, enced_doc['binary'], iv)))
+            docs.append(self._doc_decrypt(collection_name, enced_doc)[1])
 
         return docs
 
@@ -53,10 +49,9 @@ class EncDB_Local:
         ids = self.index_server.search_tokens_union(tokens)
         enced_docs = self._retrieve_docs(collection_name, ids)
         # client
-        key, iv = self._get_doc_key_iv(collection_name)
         docs = []
         for enced_doc in enced_docs: 
-            docs.append(bson.decode(aes_dec(key, enced_doc['binary'], iv)))
+            docs.append(self._doc_decrypt(collection_name, enced_doc)[1])
 
         return docs
         
@@ -64,13 +59,51 @@ class EncDB_Local:
         objids = []
         for id in ids:
             objids.append(ObjectId(id))
-        cursor = self.document_db[collection_name].find({'_id': {'$in': objids}})
+        cursor = self.document_db[self._cname_encrypt(collection_name)].find({'_id': {'$in': objids}})
         docs = []
         for doc in cursor:
             docs.append(doc)
 
         return docs
 
+    def _doc_encrypt(self, objid: ObjectId, collection_name: str, document: dict):
+        ckey, civ = self._get_or_gen_collection_key_iv(collection_name)
+        enced_doc = {}
+        for field_name, val in document.items():
+            enced_fname = bytes2astr(aes_enc(ckey, bytes(field_name, 'utf-8'), civ))
+            iv = urandom(16)
+            enced_val = {
+                'rnd': aes_enc(self._get_or_gen_field_key(collection_name, field_name), bson.encode({'0': val}), iv),
+                'iv': iv
+            }
+            enced_doc[enced_fname] = enced_val
+
+        enced_doc['_id'] = objid
+
+        return enced_doc
+
+    def _doc_decrypt(self, collection_name: str, enced_doc: dict):
+        ckey, civ = self._get_collection_key_iv(collection_name)
+        doc = {}
+        objid = enced_doc.pop('_id')
+        for enced_fname, enced_val in enced_doc.items():
+            field_name = str(aes_dec(ckey, astr2bytes(enced_fname), civ), 'utf-8')
+            val = bson.decode(aes_dec(self._get_field_key(collection_name, field_name), enced_val['rnd'], enced_val['iv']))['0']
+            doc[field_name] = val
+
+        return objid, doc
+
+    def _fname_encrypt(self, collection_name: str, field_name: str):
+        ckey, civ = self._get_or_gen_collection_key_iv(collection_name)
+        return bytes2astr(aes_enc(ckey, bytes(field_name, 'utf-8'), civ))
+
+    def _cname_encrypt(self, collection_name: str):
+        ckey, civ = self._get_or_gen_collection_key_iv(collection_name)
+        return bytes2astr(aes_enc(ckey, bytes(collection_name, 'utf-8'), civ))
+
+    def _fname_decrypt(self, collection_name: str, enced_name):
+        ckey, civ = self._get_or_gen_collection_key_iv(collection_name)
+        return str(aes_dec(ckey, astr2bytes(enced_name), civ), 'utf-8')
 
     def _gen_index_insert_tokens(self, objid: ObjectId, collection_name: str, document: dict):
         id = objid.binary
@@ -106,30 +139,46 @@ class EncDB_Local:
         else:
             return bytes(val)
 
-    def _get_or_gen_doc_key_iv(self, collection_name: str):
-        key_iv = self.client_keys_db.get(self._collection_key_iv_key(collection_name)) 
+    def _get_or_gen_collection_key_iv(self, collection_name: str):
+        collection_key_iv_key = self._collection_key_iv_key(collection_name)
+        key_iv = self.client_keys_db.get(collection_key_iv_key) 
         if key_iv is None:
             key = urandom(16) 
             iv = urandom(16)
-            self.client_keys_db.put(self._collection_key_iv_key(collection_name), key+iv)
+            self.client_keys_db.put(collection_key_iv_key, key+iv)
         else:
             key = key_iv[:16]
             iv = key_iv[16:]
 
         return key, iv
 
-    def _get_doc_key_iv(self, collection_name: str):
+    def _get_collection_key_iv(self, collection_name: str):
         key_iv = self.client_keys_db.get(self._collection_key_iv_key(collection_name)) 
         return key_iv[:16], key_iv[16:]
 
+    def _get_or_gen_field_key(self, collection_name: str, field_name: str):
+        field_key_key = self._field_key_key(collection_name, field_name)
+        key = self.client_keys_db.get(field_key_key)
+        if key is None:
+            key = urandom(16)
+            self.client_keys_db.put(field_key_key, key)
+
+        return key
+
+    def _get_field_key(self, collection_name: str, field_name: str):
+        return self.client_keys_db.get(self._field_key_key(collection_name, field_name))
+
     def _collection_key_iv_key(self, collection_name):
-        return b'ck:' + bytes(collection_name, 'utf-8') 
+        return b'c:' + bytes(collection_name, 'utf-8') 
+
+    def _field_key_key(self, collection_name, field_name):
+        return b'f:' + bytes(collection_name, 'utf-8') + b':' + bytes(field_name, 'utf-8')
 
     def _get_or_gen_index_client_key(self):
-        key = self.client_keys_db.get(b'ik')
+        key = self.client_keys_db.get(b'i')
         if key is None:
             key = urandom(32)
-        self.client_keys_db.put(b'ik', key)
+        self.client_keys_db.put(b'i', key)
 
         return key
 
