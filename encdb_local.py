@@ -1,6 +1,6 @@
 from db_index import *
 from pymongo import MongoClient
-from ruamel.yaml import YAML
+from ruamel.yaml import YAML, tokens
 import rocksdb
 import bson
 from bson.objectid import ObjectId
@@ -13,7 +13,7 @@ class EncDB_Local:
         with open(config_path) as f:
             self.config = YAML(typ='safe').load(f)
         self.client_keys_db = rocksdb.DB(self._client_keys_path(), rocksdb.Options(create_if_missing=True))
-        self.index_client = DBIndexClient(self._client_index_path(), self._get_or_gen_index_client_key())
+        self.index_client = DBIndexClient(self._client_index_path1(), self._client_index_path2(), self._get_or_gen_index_client_key())
         self.index_server = DBIndexServer(self._server_index_path(), self.index_client.get_key_for_server())
         self.document_db = MongoClient(self.config['mongodb']['uri'])[self.config['mongodb']['db_name']]
 
@@ -37,7 +37,7 @@ class EncDB_Local:
 
     def search_equal(self, collection_name, field_name, val):
         # client
-        tokens = self.index_client.gen_search_equal_tokens(collection_name, field_name, self._val_to_bytes(val))
+        tokens = self.index_client.gen_search_equal_tokens(collection_name, field_name, val)
         # server
         ids = self.index_server.search_tokens_union(tokens)
         enced_docs = self._retrieve_docs(collection_name, ids)
@@ -50,8 +50,7 @@ class EncDB_Local:
 
     def search_range(self, collection_name, field_name, a, b):
         # client
-        range_log_2 = self.config['collections'][collection_name][field_name]['func:range']['range_log_2']
-        tokens = self.index_client.gen_search_range_tokens(collection_name, field_name, a, b, range_log_2)
+        tokens = self.index_client.gen_search_range_tokens(collection_name, field_name, a, b)
         # server
         ids = self.index_server.search_tokens_union(tokens)
         enced_docs = self._retrieve_docs(collection_name, ids)
@@ -114,57 +113,20 @@ class EncDB_Local:
 
     def _gen_index_insert_tokens(self, objid: ObjectId, collection_name: str, document: dict):
         id = objid.binary
-        collection_config = self.config.get('collections')
-        if collection_config == None:
-            return []
-        field_configs = collection_config.get(collection_name)
-        if field_configs is not None:
-            tokens = []
-            for field in document.keys():
-                field_config = field_configs.get(field)
-                if field_config != None:
-                    for func in field_config.keys():
-                        if func == 'func:equal':
-                            tokens.extend(self.index_client.gen_update_equal_tokens('add', collection_name, id, field, self._val_to_bytes(document[field])))
-                        if func == 'func:range':
-                            tokens.extend(self.index_client.gen_update_range_tokens('add', collection_name, id, field, document[field], field_config['func:range']['range_log_2']))
-            return tokens
+        tokens = []
+        for field in document.keys():
+            tokens.extend(self.index_client.gen_update_tokens('add', collection_name, id, field, document[field]))
 
-        return []
+        return tokens
 
     def _gen_index_delete_tokens(self, collection_name: str, document: dict):
         id = document['_id'].binary
-        collection_config = self.config.get('collections')
-        if collection_config == None:
-            return []
-        field_configs = collection_config.get(collection_name)
-        if field_configs is not None:
-            tokens = []
-            for field in document.keys():
-                field_config = field_configs.get(field)
-                if field_config != None:
-                    for func in field_config.keys():
-                        if func == 'func:equal':
-                            tokens.extend(self.index_client.gen_update_equal_tokens('del', collection_name, id, field, self._val_to_bytes(document[field])))
-                        if func == 'func:range':
-                            tokens.extend(self.index_client.gen_update_range_tokens('del', collection_name, id, field, document[field], field_config['func:range']['range_log_2']))
-            return tokens
+        del document['_id']
+        tokens = []
+        for field in document.keys():
+            tokens.extend(self.index_client.gen_update_tokens('del', collection_name, id, field, document[field]))
 
-        return []
-
-    def _val_to_bytes(self, val):
-        t = type(val)
-        if t is str:
-            return bytes(val, 'utf-8')
-        elif t is int:
-            if val > 0xffff:
-                return val.to_bytes(8, 'big')
-            else:
-                return val.to_bytes(4, 'big')
-        elif t is bytes:
-            return val
-        else:
-            return bytes(val)
+        return tokens
 
     def _get_or_gen_collection_key_iv(self, collection_name: str):
         collection_key_iv_key = self._collection_key_iv_key(collection_name)
@@ -209,8 +171,11 @@ class EncDB_Local:
 
         return key
 
-    def _client_index_path(self):
-        return os.path.join(self.config['client_storage_path'], 'index.db')
+    def _client_index_path1(self):
+        return os.path.join(self.config['client_storage_path'], 'index1.db')
+
+    def _client_index_path2(self):
+        return os.path.join(self.config['client_storage_path'], 'index2.db')
 
     def _client_keys_path(self):
         return os.path.join(self.config['client_storage_path'], 'keys.db')

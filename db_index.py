@@ -1,8 +1,11 @@
 from fast import *
-from bitarray.util import ba2int, int2ba
+import rocksdb
+from sortedcontainers import SortedDict
+from lru import LRU
+import bson
 
 class DBIndexClient:
-    def __init__(self, db_path: str, key=None):
+    def __init__(self, sse_db_path: str, index_db_path: str, key=None):
         if key != None:
             k_s_iv = {
                 'k_s': key[:16],
@@ -10,7 +13,9 @@ class DBIndexClient:
             }
         else:
             k_s_iv = None
-        self.fast_client = FASTClient(db_path, k_s_iv)
+        self.fast_client = FASTClient(sse_db_path, k_s_iv)
+        self.tree_db = rocksdb.DB(index_db_path, rocksdb.Options(create_if_missing=True)) 
+        self.tree_cache = LRU(20)
 
     def get_key(self) -> bytes:
         k_s_iv = self.fast_client.get_keys()
@@ -26,51 +31,66 @@ class DBIndexClient:
         }
         self.fast_client.set_keys(k_s_iv)
 
-    def gen_update_equal_tokens(self, op: str, table_name: str, id: bytes, field_name: str, val: bytes):
-        return [self.fast_client.gen_update_tokens(id, self._equal_keyword(table_name, field_name, val), op)]
+    def gen_update_tokens(self, op: str, collection_name: str, id: bytes, field_name: str, val):
+        t = type(val)
+        if t is int or t is float:
+            tree = self._get_tree(collection_name, field_name)
+            if op == 'add':
+                self._tree_insert(tree, val)
+            else:
+                self._tree_delete(tree, val)
+            self._set_tree(collection_name, field_name, tree)
+        return [self.fast_client.gen_update_tokens(id, self._keyword(collection_name, field_name, self._val_encode(val)), op)]
 
-    def gen_update_range_tokens(self, op: str, table_name: str, id: bytes, field_name: str, val: int, range_log_2: int):
-        val_bin = int2ba(val, length=range_log_2, endian='big')
-        tokens_list = []
-        for i in range(range_log_2+1):
-            tokens_list.append(self.fast_client.gen_update_tokens(id, self._range_keyword(table_name, field_name, val_bin[:i].tobytes(), i), op))
+    def gen_search_equal_tokens(self, collection_name: str, field_name: str, val):
+        return [self.fast_client.gen_search_tokens(self._keyword(collection_name, field_name, self._val_encode(val)))]
 
-        return tokens_list
+    def gen_search_range_tokens(self, collection_name: str, field_name: str, a, b):
+        tree = self._get_tree(collection_name, field_name)
+        tokens = []
+        for val in tree.irange(a, b):
+            tokens.extend(self.gen_search_equal_tokens(collection_name, field_name, val))
 
-    def gen_search_equal_tokens(self, table_name: str, field_name: str, val: bytes):
-        return [self.fast_client.gen_search_tokens(self._equal_keyword(table_name, field_name, val))]
+        return tokens
 
-    def gen_search_range_tokens(self, table_name: str, field_name: str, a: int, b: int, range_log_2: int):
-        cset = set()
-        i = 0
-        a_bin = int2ba(a, range_log_2, 'big')
-        b_bin = int2ba(b, range_log_2, 'big')
-        while len(a_bin) != 0 and ba2int(a_bin) < ba2int(b_bin):
-            if a_bin[-1] == 1:
-                cset.add((a_bin.tobytes(), range_log_2-i))
-            if b_bin[-1] == 0:
-                cset.add((b_bin.tobytes(), range_log_2-i))
-            a_bin = int2ba(ba2int(a_bin) + 1, range_log_2-i, 'big')
-            b_bin = int2ba(ba2int(b_bin) - 1, range_log_2-i, 'big')
+    def _val_encode(self, val):
+        return bson.encode({'0': val})
 
-            a_bin = a_bin[:-1] 
-            b_bin = b_bin[:-1]
-            i += 1
-        if a_bin == b_bin:
-            cset.add((a_bin.tobytes(), range_log_2-i))
-        tokens_list = []
-        for (val, bit_len) in cset:
-            tokens = self.fast_client.gen_search_tokens(self._range_keyword(table_name, field_name, val, bit_len))
-            if tokens is not None:
-                tokens_list.append(self.fast_client.gen_search_tokens(self._range_keyword(table_name, field_name, val, bit_len)))
-        
-        return tokens_list
+    def _val_decode(self, b):
+        return bson.decode(b)['0']
 
-    def _equal_keyword(self, table_name: str, field_name: str, val: bytes):
-        return bytes(table_name, 'utf-8')+b':e:'+bytes(field_name, 'utf-8')+b':'+val
+    def _get_tree(self, collection_name: str, field_name: str):
+        key = collection_name + ':' + field_name
+        if self.tree_cache.has_key(key):
+            return self.tree_cache[key]
+        raw_tree = self.tree_db.get(bytes(key, 'utf-8'))
+        if raw_tree is None:
+            return SortedDict()
+        tree = SortedDict(bson.decode(raw_tree)['0'])
+        self.tree_cache[key] = tree
+        return tree
 
-    def _range_keyword(self, table_name: str, field_name: str, val: bytes, bit_len: int):
-        return bytes(table_name, 'utf-8')+b':r:'+bytes(field_name, 'utf-8')+b':'+bytes(str(bit_len), 'utf-8')+b':'+val
+    def _tree_insert(self, tree: SortedDict, val):
+        if val in tree.keys():
+            tree[val] += 1
+        else:
+            tree[val] = 1
+
+    def _tree_delete(self, tree: SortedDict, val):
+        if val not in tree.keys():
+            return
+        tree[val] -= 1
+        if tree[val] < 1:
+            del tree[val]
+            
+    def _set_tree(self, collection_name: str, field_name: str, tree: SortedDict):
+        key = collection_name + ':' +field_name
+        if self.tree_cache.has_key(key):
+            self.tree_cache[key] = tree
+        self.tree_db.put(bytes(key, 'utf-8'), bson.encode({'0': list(tree.items())}))
+
+    def _keyword(self, collection_name: str, field_name: str, val: bytes):
+        return bytes(collection_name, 'utf-8')+b':'+bytes(field_name, 'utf-8')+b':'+val
 
 class DBIndexServer:
     def __init__(self, db_path, key):

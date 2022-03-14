@@ -7,18 +7,3 @@ mongodb:
   uri: 'mongodb://gytadmin:123456@localhost:27017'
 
   db_name: 'test_db'
-
-
-collections:
-
-  students:
-    name:
-      "func:equal":
-    age:
-      "func:equal":
-      "func:range":
-        range_log_2: 16
-    score:
-      "func:equal":
-      "func:range":
-        range_log_2: 32
