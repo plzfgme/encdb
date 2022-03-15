@@ -45,7 +45,7 @@ class DBIndexClient:
     def gen_search_equal_tokens(self, collection_name: str, field_name: str, val):
         return [self.fast_client.gen_search_tokens(self._keyword(collection_name, field_name, self._val_encode(val)))]
 
-    def gen_search_range_tokens(self, collection_name: str, field_name: str, a, b):
+    def gen_search_range_tokens(self, collection_name: str, field_name: str, a=None, b=None):
         tree = self._get_tree(collection_name, field_name)
         tokens = []
         for val in tree.irange(a, b):

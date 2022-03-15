@@ -1,6 +1,6 @@
 from db_index import *
 from pymongo import MongoClient
-from ruamel.yaml import YAML, tokens
+from ruamel.yaml import YAML
 import rocksdb
 import bson
 from bson.objectid import ObjectId
