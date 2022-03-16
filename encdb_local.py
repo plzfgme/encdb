@@ -7,6 +7,7 @@ from bson.objectid import ObjectId
 from os import urandom
 import os
 from crypto_utils import *
+from query_parse import *
 
 class EncDB_Local:
     def __init__(self, config_path: str):
@@ -34,33 +35,71 @@ class EncDB_Local:
         # server
         self.index_server.update(tokens)
 
-
-    def search_equal(self, collection_name, field_name, val):
+    def find(self, collection_name, query: dict, projection=None):
         # client
-        tokens = self.index_client.gen_search_equal_tokens(collection_name, field_name, val)
+        tree = query_to_logical_tree(query)
+        self._to_tokens_tree(collection_name, tree)
+        if projection is not None:
+            enced_proj = self._project_encrypt(collection_name, projection)
+        else:
+            enced_proj = None
+        enced_cname = self._cname_encrypt(collection_name)
         # server
-        ids = self.index_server.search_tokens_union(tokens)
-        enced_docs = self._retrieve_docs(collection_name, ids)
-        # client
-        docs = []
-        for enced_doc in enced_docs:
-            docs.append(self._doc_decrypt(collection_name, enced_doc))
-
-        return docs
-
-    def search_range(self, collection_name, field_name, a, b):
-        # client
-        tokens = self.index_client.gen_search_range_tokens(collection_name, field_name, a, b)
-        # server
-        ids = self.index_server.search_tokens_union(tokens)
-        enced_docs = self._retrieve_docs(collection_name, ids)
+        query = self._to_query(tree)
+        enced_docs = self._retrieve_docs_by_query(enced_cname, query, enced_proj)
         # client
         docs = []
         for enced_doc in enced_docs: 
             docs.append(self._doc_decrypt(collection_name, enced_doc))
 
         return docs
+
+    def _to_tokens_tree(self, collection_name: str, tree: LogicalTree):
+        for i, child in enumerate(tree.children):
+            if type(child) is LogicalTree:
+                self._to_tokens_tree(collection_name, child)
+            else:
+                op = child[1]
+                if op == '$eq':
+                    tree.children[i] = ('$in', self.index_client.gen_search_equal_tokens(collection_name, child[0], child[2]))
+                elif op == '$ne':
+                    tree.children[i] = ('$nin', self.index_client.gen_search_equal_tokens(collection_name, child[0], child[2]))
+                elif op == '$lte':
+                    tree.children[i] = ('$in', self.index_client.gen_search_range_tokens(collection_name, child[0], b=child[2]))
+                elif op == '$gte':
+                    tree.children[i] = ('$in', self.index_client.gen_search_range_tokens(collection_name, child[0], a=child[2]))
+
+    def _to_query(self, tree: LogicalTree):
+        exp_list = []
+        for child in tree.children:
+            if type(child) is LogicalTree:
+                exp_list.append(self._to_query(child))
+            else:
+                ids = self.index_server.search_tokens_union(child[1])
+                objids = []
+                for id in ids:
+                    objids.append(ObjectId(id))
+                exp_list.append({'_id': {child[0]: objids}})
+        if tree.type == '$not':
+            return {'$not': exp_list[0]}
+        else:
+            return {tree.type: exp_list}
         
+    def _project_encrypt(self, collection_name: str, projection: dict):
+        enced_proj = {}
+        for key, val in projection.items():
+            enced_proj[self._fname_encrypt(collection_name, key)] = val
+
+        return enced_proj
+
+    def _retrieve_docs_by_query(self, collection_name: str, query: dict, projection):
+        cursor = self.document_db[collection_name].find(query, projection=projection)
+        docs = []
+        for doc in cursor:
+            docs.append(doc)
+
+        return docs
+
     def _retrieve_docs(self, collection_name: str, ids):
         objids = []
         for id in ids:
